@@ -130,8 +130,12 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
 
         if (playerViewController != nil) || (playerView != nil) {
 //            playerViewController.player.currentItem!.removeObserver(self, forKeyPath:"playbackLikelyToKeepUp", context:nil)
-            if (playerView != nil) {
-                NotificationCenter.default.removeObserver(self, forKeyPath:"isPictureInPicturePossible", context:nil)
+            if (playerView != nil && pipEnabled) {
+                // Remove observer from pipController, not from NotificationCenter
+                let pipController = playerView.pictureInPictureController
+                if (pipController != nil) {
+                    pipController?.removeObserver(self, forKeyPath:"isPictureInPicturePossible", context:nil)
+                }
             }
         }
 
@@ -935,7 +939,8 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     // MARK: - JWPlayer View helpers
 
     func setupPlayerView(config: [String: Any], playerConfig: JWPlayerConfiguration) {
-        playerView = JWPlayerView(frame:self.superview!.frame)
+        let frame = self.superview?.frame ?? CGRect.zero
+        playerView = JWPlayerView(frame: frame)
 
         playerView.delegate = self
         playerView.player.delegate = self
