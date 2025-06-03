@@ -318,13 +318,11 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
                 self.deinitAudioSession()
             }
             
-            // Pull out top level iOS DRM values from config if present
-            // This is most often used in non-legacy configs using JWP DRM solutions
-            processSpcUrl = config["processSpcUrl"] as? String
-            fairplayCertUrl = config["certificateUrl"] as? String
-            contentUUID = config["contentUUID"] as? String
-            
             if forceLegacyConfig == true {
+                // Pull from top level of config
+                processSpcUrl = config["processSpcUrl"] as? String
+                fairplayCertUrl = config["certificateUrl"] as? String
+                contentUUID = config["contentUUID"] as? String
 
                 // Dangerous: check playlist for processSpcUrl / fairplayCertUrl in playlist
                 // Only checks first playlist item as multi-item DRM playlists are ill advised
@@ -340,6 +338,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
                     }
                 }
             } else {
+                // TODO -- Ensure JWJSONParser pulls out cert/spc for sources (Expected in JW iOS SDK v4.19.0)
             }
 
             do {
@@ -826,6 +825,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             playerViewController.view.frame = self.frame
             self.addSubview(playerViewController.view)
             playerViewController.setDelegates()
+            playerViewController.player.contentKeyDataSource = self
         }
 
         if let ib = config["interfaceBehavior"] as? String {
@@ -1142,51 +1142,103 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     // MARK: - DRM Delegate
 
     func contentIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
-        let data:Data! = url.host?.data(using: String.Encoding.utf8)
-        handler(data)
-    }
-
-    func appIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
-        guard let fairplayCertUrlString = fairplayCertUrl, let finalUrl = URL(string: fairplayCertUrlString) else {
-            return
-        }
-        
-        let request = URLRequest(url: finalUrl)
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-            if let error = error {
-                print("DRM cert request error - \(error.localizedDescription)")
-            }
+            // Axinom DRM: Extraer content ID del host de la URL
+            // Similar a tu implementación exitosa en JWPlayer
+            let data: Data! = url.host?.data(using: String.Encoding.utf8)
             handler(data)
         }
-        task.resume()
-    }
 
-    func contentKeyWithSPCData(_ spcData: Data, completionHandler handler: @escaping (Data?, Date?, String?) -> Void) {
-        if processSpcUrl == nil {
-            return
+        func appIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
+            // Axinom DRM: Cargar el certificado FairPlay
+            guard let fairplayCertUrlString = fairplayCertUrl, let finalUrl = URL(string: fairplayCertUrlString) else {
+                print("DRM: No certificate URL provided")
+                handler(nil)
+                return
+            }
+            
+            let request = URLRequest(url: finalUrl)
+            let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+                if let error = error {
+                    print("DRM cert request error - \(error.localizedDescription)")
+                    handler(nil)
+                    return
+                }
+                
+                // Axinom DRM: Verificar que el certificado se cargó correctamente
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
+                    print("DRM cert request failed with status code: \(httpResponse.statusCode)")
+                    handler(nil)
+                    return
+                }
+                
+                handler(data)
+            }
+            task.resume()
         }
 
-        guard let processSpcUrl = URL(string: processSpcUrl) else {
-            print("Invalid processSpcUrl")
-            handler(nil, nil, nil)
-            return
-        }
-
-        var ckcRequest = URLRequest(url: processSpcUrl)
-        ckcRequest.httpMethod = "POST"
-        ckcRequest.httpBody = spcData
-        ckcRequest.addValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-
-        URLSession.shared.dataTask(with: ckcRequest) { (data, response, error) in
-            if let httpResponse = response as? HTTPURLResponse, (error != nil || httpResponse.statusCode != 200) {
-                print("DRM ckc request error - %@", error?.localizedDescription ?? "Unknown error")
+        func contentKeyWithSPCData(_ spcData: Data, completionHandler handler: @escaping (Data?, Date?, String?) -> Void) {
+            // Axinom DRM: Validar que tenemos la URL del servidor de licencias
+            guard let processSpcUrl = processSpcUrl else {
+                print("DRM: No license server URL provided")
                 handler(nil, nil, nil)
                 return
             }
 
-            handler(data, nil, "application/octet-stream")
-        }.resume()
-    }
+            guard let processSpcUrlObj = URL(string: processSpcUrl) else {
+                print("DRM: Invalid license server URL - \(processSpcUrl)")
+                handler(nil, nil, nil)
+                return
+            }
+
+            // Axinom DRM: Configurar la petición HTTP para Axinom
+            var ckcRequest = URLRequest(url: processSpcUrlObj)
+            ckcRequest.httpMethod = "POST"
+            
+            // Axinom DRM: Headers específicos para Axinom
+            // X-AxDRM-Message puede estar vacío para uso básico
+            ckcRequest.setValue("", forHTTPHeaderField: "X-AxDRM-Message")
+            
+            // Axinom DRM: Content-Type para datos binarios (igual que tu implementación JWPlayer)
+            ckcRequest.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            
+            // Axinom DRM: Enviar SPC data directamente como datos binarios (sin codificación base64)
+            ckcRequest.httpBody = spcData
+
+            print("DRM: Sending license request to: \(processSpcUrl)")
+            print("DRM: SPC data size: \(spcData.count) bytes")
+
+            URLSession.shared.dataTask(with: ckcRequest) { (data, response, error) in
+                if let error = error {
+                    print("DRM license request error - \(error.localizedDescription)")
+                    handler(nil, nil, nil)
+                    return
+                }
+                
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    print("DRM: Invalid response type")
+                    handler(nil, nil, nil)
+                    return
+                }
+                
+                if httpResponse.statusCode != 200 {
+                    print("DRM license request failed with status code: \(httpResponse.statusCode)")
+                    handler(nil, nil, nil)
+                    return
+                }
+                
+                guard let responseData = data else {
+                    print("DRM: No license data received")
+                    handler(nil, nil, nil)
+                    return
+                }
+                
+                print("DRM: License received successfully, size: \(responseData.count) bytes")
+                
+                // Axinom DRM: Devolver la licencia tal como viene (sin decodificación base64)
+                // Content-Type se mantiene como binario
+                handler(responseData, nil, "application/octet-stream")
+            }.resume()
+        }
 
     // MARK: - AV Picture In Picture Delegate
 
