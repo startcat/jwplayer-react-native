@@ -377,9 +377,9 @@ export default class JWPlayer extends Component {
 		setCurrentAudioTrack: PropTypes.func,
 		setCurrentCaptions: PropTypes.func,
 		getCurrentCaptions: PropTypes.func,
-		onCaptionsChanged: PropTypes.func,
-		onCaptionsList: PropTypes.func,
-		onAudioTracks: PropTypes.func,
+		onJWCaptionsChanged: PropTypes.func,
+		onJWCaptionsList: PropTypes.func,
+		onJWAudioTracks: PropTypes.func,
 		/**
 		 * Callback that is fired when the player is about to play the next playlist item.
 		 * Indented to be paired with `playlistItemCallbackEnabled` prop

@@ -31,9 +31,9 @@ RCT_EXPORT_VIEW_PROPERTY(onIdle, RCTDirectEventBlock);
 RCT_EXPORT_VIEW_PROPERTY(onPlaylistItem, RCTDirectEventBlock);
 
 /* av events */
-RCT_EXPORT_VIEW_PROPERTY(onAudioTracks, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onCaptionsChanged, RCTDirectEventBlock);
-RCT_EXPORT_VIEW_PROPERTY(onCaptionsList, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onJWAudioTracks, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onJWCaptionsChanged, RCTDirectEventBlock);
+RCT_EXPORT_VIEW_PROPERTY(onJWCaptionsList, RCTDirectEventBlock);
 
 /* player events */
 RCT_EXPORT_VIEW_PROPERTY(onPlayerReady, RCTDirectEventBlock);

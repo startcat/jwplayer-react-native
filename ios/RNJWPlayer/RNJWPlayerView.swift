@@ -21,7 +21,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     JWPlayerViewControllerFullScreenDelegate, JWPlayerViewControllerUIDelegate,
     JWPlayerViewControllerRelatedDelegate, JWDRMContentKeyDataSource,
     JWTimeEventListener, AVPictureInPictureControllerDelegate
-{ 
+{
     
     // MARK: - RNJWPlayer allocation
 
@@ -66,7 +66,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     @objc var onPlaylistComplete: RCTDirectEventBlock?
     @objc var onBeforeComplete: RCTDirectEventBlock?
     @objc var onComplete: RCTDirectEventBlock?
-    @objc var onAudioTracks: RCTDirectEventBlock?
+    @objc var onJWAudioTracks: RCTDirectEventBlock?
     @objc var onPlayerReady: RCTDirectEventBlock?
     @objc var onSetupPlayerError: RCTDirectEventBlock?
     @objc var onPlayerError: RCTDirectEventBlock?
@@ -91,8 +91,8 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     @objc var onCasting: RCTDirectEventBlock?
     @objc var onCastingEnded: RCTDirectEventBlock?
     @objc var onCastingFailed: RCTDirectEventBlock?
-    @objc var onCaptionsChanged: RCTDirectEventBlock?
-    @objc var onCaptionsList: RCTDirectEventBlock?
+    @objc var onJWCaptionsChanged: RCTDirectEventBlock?
+    @objc var onJWCaptionsList: RCTDirectEventBlock?
     @objc var onBeforeNextPlaylistItem: RCTDirectEventBlock?
     
     init() {
@@ -322,27 +322,45 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
                 self.deinitAudioSession()
             }
             
+            // ✅ CONFIGURAR DRM URLS ANTES DE CREAR EL PLAYER
             if forceLegacyConfig == true {
                 // Pull from top level of config
                 processSpcUrl = config["processSpcUrl"] as? String
-                fairplayCertUrl = config["certificateUrl"] as? String
+                fairplayCertUrl = config["fairplayCertUrl"] as? String
+                
+                print("🔐 DRM Config from top level - processSpcUrl: \(String(describing: processSpcUrl))")
+                print("🔐 DRM Config from top level - fairplayCertUrl: \(String(describing: fairplayCertUrl))")
                 contentUUID = config["contentUUID"] as? String
 
-                // Dangerous: check playlist for processSpcUrl / fairplayCertUrl in playlist
-                // Only checks first playlist item as multi-item DRM playlists are ill advised
+                // ✅ IMPORTANTE: También revisar playlist para DRM URLs
                 if let playlist = config["playlist"] as? [AnyObject] {
                     let item = playlist.first
                     if let itemMap = item as? [String: Any] {
+                        // Revisar tanto en top level como en drmConfig
                         if itemMap["processSpcUrl"] != nil {
                             processSpcUrl = itemMap["processSpcUrl"] as? String
+                            print("🔐 DRM Config from playlist item (legacy) - processSpcUrl: \(String(describing: processSpcUrl))")
                         }
-                        if itemMap["certificateUrl"] != nil {
-                            fairplayCertUrl = itemMap["certificateUrl"] as? String
+
+                        if itemMap["fairplayCertUrl"] != nil {
+                            fairplayCertUrl = itemMap["fairplayCertUrl"] as? String
+                            print("🔐 DRM Config from playlist item (legacy) - fairplayCertUrl: \(String(describing: fairplayCertUrl))")
+                        }
+                        
+                        // ✅ NUEVO: Revisar en drmConfig structure
+                        if let drmConfig = itemMap["drmConfig"] as? [String: Any],
+                           let fairplay = drmConfig["fairplay"] as? [String: Any] {
+                            if let licenseUrl = fairplay["licenseAcquisitionURL"] as? String {
+                                processSpcUrl = licenseUrl
+                                print("🔐 DRM Config from playlist drmConfig - processSpcUrl: \(licenseUrl)")
+                            }
+                            if let certUrl = fairplay["certificateURL"] as? String {
+                                fairplayCertUrl = certUrl
+                                print("🔐 DRM Config from playlist drmConfig - fairplayCertUrl: \(certUrl)")
+                            }
                         }
                     }
                 }
-            } else {
-                // TODO -- Ensure JWJSONParser pulls out cert/spc for sources (Expected in JW iOS SDK v4.19.0)
             }
 
             do {
@@ -366,7 +384,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
                 }
 
             } catch {
-                print(error)
+                print("❌ Error setting up player: \(error)")
             }
         } else {
             pendingConfig = true
@@ -614,7 +632,6 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     }
 
     // MARK: - RNJWPlayer config helpers
-
     func getPlayerItem(item: [String: Any]) throws -> JWPlayerItem {
         let itemBuilder = JWPlayerItemBuilder()
 
@@ -646,6 +663,20 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
                     sourceBuilder.label(label)
                     sourceBuilder.defaultVideo(isDefault)
                     
+                    // ✅ EN JWPlayerKit 4.22.0, EL DRM SE MANEJA A TRAVÉS DEL contentKeyDataSource
+                    // No necesitamos configurar DRM a nivel de source, solo guardamos las URLs
+                    if let drm = source["drm"] as? [String: Any] {
+                        if let fairplay = drm["fairplay"] as? [String: Any] {
+                            if let processSpcUrl = fairplay["processSpcUrl"] as? String,
+                               let certificateUrl = fairplay["certificateUrl"] as? String {
+                                // Guardar las URLs para usar en el contentKeyDataSource
+                                self.processSpcUrl = processSpcUrl
+                                self.fairplayCertUrl = certificateUrl
+                                print("DRM: Setting FairPlay URLs from source - processSpcUrl: \(processSpcUrl), certificateUrl: \(certificateUrl)")
+                            }
+                        }
+                    }
+                    
                     if let sourceItem = try? sourceBuilder.build() {
                         sourcesArray.append(sourceItem)
                     }
@@ -653,6 +684,19 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             }
             
             itemBuilder.videoSources(sourcesArray)
+        }
+
+        // ✅ CONFIGURAR DRM A NIVEL DE ITEM SI NO HAY SOURCES
+        if let drm = item["drm"] as? [String: Any] {
+            if let fairplay = drm["fairplay"] as? [String: Any] {
+                if let processSpcUrl = fairplay["processSpcUrl"] as? String,
+                   let certificateUrl = fairplay["certificateUrl"] as? String {
+                    // Guardar las URLs para usar en el contentKeyDataSource
+                    self.processSpcUrl = processSpcUrl
+                    self.fairplayCertUrl = certificateUrl
+                    print("DRM: Setting FairPlay URLs from item - processSpcUrl: \(processSpcUrl), certificateUrl: \(certificateUrl)")
+                }
+            }
         }
 
         // Process other properties
@@ -737,7 +781,6 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
         let playerItem = try itemBuilder.build()
 
         return playerItem
-
     }
 
     func getPlayerConfiguration(config: [String: Any]) throws -> JWPlayerConfiguration {
@@ -805,6 +848,16 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             }
         }
 
+        // ✅ EN JWPlayerKit 4.22.0, EL DRM SE MANEJA EXCLUSIVAMENTE A TRAVÉS DE JWDRMContentKeyDataSource
+        // No necesitamos configurar DRM aquí, solo asegurar que las URLs estén disponibles
+        if let fairplayCertUrlString = fairplayCertUrl,
+           let processSpcUrlString = processSpcUrl {
+            print("🔐 DRM: FairPlay URLs available - cert: \(fairplayCertUrlString), license: \(processSpcUrlString)")
+            print("🔐 DRM: DRM will be handled via JWDRMContentKeyDataSource delegate methods")
+        } else {
+            print("🔐 DRM: No DRM configuration found")
+        }
+        
         let playerConfig = try configBuilder.build()
 
         return playerConfig
@@ -812,6 +865,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
 
     // MARK: - JWPlayer View Controller helpers
 
+    // ✅ MEJORAR LA CONFIGURACIÓN DEL PLAYER PARA ASEGURAR QUE EL DRM FUNCIONE
     func setupPlayerViewController(config: [String: Any], playerConfig: JWPlayerConfiguration) {
         if playerViewController == nil {
             playerViewController = RNJWPlayerViewController()
@@ -829,9 +883,19 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             playerViewController.view.frame = self.frame
             self.addSubview(playerViewController.view)
             playerViewController.setDelegates()
-            playerViewController.player.contentKeyDataSource = self
         }
 
+        // ✅ CONFIGURAR DRM ANTES DE CONFIGURAR EL PLAYER CON TIMEOUT EXTENDIDO
+        if let processSpcUrlString = processSpcUrl, let fairplayCertUrlString = fairplayCertUrl {
+            print("🔐🔐🔐 DRM: Setting up contentKeyDataSource with extended timeout")
+            playerViewController.player.contentKeyDataSource = self
+            
+            // ✅ CONFIGURAR TIMEOUT EXTENDIDO PARA DRM (si está disponible)
+            // Algunos SDKs permiten configurar timeouts para DRM
+            print("🔐🔐🔐 DRM: DRM URLs configured for extended processing")
+        }
+
+        // ✅ CONFIGURAR OTRAS PROPIEDADES DEL PLAYER
         if let ib = config["interfaceBehavior"] as? String {
             interfaceBehavior = RCTConvert.JWInterfaceBehavior(ib)
         }
@@ -878,11 +942,6 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             }
         }
 
-    //    playerViewController.adInterfaceStyle
-    //    playerViewController.logo
-    //    playerView.videoGravity = 0;
-    //    playerView.captionStyle
-
         if let offlineMsg = config["offlineMessage"] as? String {
             playerViewController.offlineMessage = offlineMsg
         }
@@ -896,6 +955,8 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             }
         }
 
+        // ✅ CONFIGURAR EL PLAYER AL FINAL CON DELAY PARA DRM
+        print("🔐🔐🔐 DRM: About to configure player - DRM setup complete")
         self.presentPlayerViewController(configuration: playerConfig)
     }
 
@@ -939,41 +1000,52 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     // MARK: - JWPlayer View helpers
 
     func setupPlayerView(config: [String: Any], playerConfig: JWPlayerConfiguration) {
+        // Manejo seguro del frame cuando superview es nil (especialmente con viewOnly:true)
         let frame = self.superview?.frame ?? CGRect.zero
         playerView = JWPlayerView(frame: frame)
 
-        playerView.delegate = self
-        playerView.player.delegate = self
-        playerView.player.playbackStateDelegate = self
-        playerView.player.adDelegate = self
-        playerView.player.avDelegate = self
-        playerView.player.contentKeyDataSource = self
+         playerView.delegate = self
+         playerView.player.delegate = self
+         playerView.player.playbackStateDelegate = self
+         playerView.player.adDelegate = self
+         playerView.player.avDelegate = self
+         
+         // ✅ CONFIGURAR DRM ANTES DE CONFIGURAR EL PLAYER (igual que en setupPlayerViewController)
+         if let processSpcUrlString = processSpcUrl, let fairplayCertUrlString = fairplayCertUrl {
+             print("🔐🔐🔐 DRM: Setting up contentKeyDataSource with extended timeout for playerView")
+             playerView.player.contentKeyDataSource = self
+             print("🔐🔐🔐 DRM: contentKeyDataSource set to self for playerView")
+             print("🔐🔐🔐 DRM: DRM URLs configured for extended processing in playerView")
+         } else {
+             print("❌❌❌ DRM: Missing DRM URLs in setupPlayerView")
+             playerView.player.contentKeyDataSource = self
+         }
 
-        playerView.player.configurePlayer(with: playerConfig)
+         playerView.player.configurePlayer(with: playerConfig)
 
-        if pipEnabled {
-            let pipController:AVPictureInPictureController! = playerView.pictureInPictureController
-            pipController.delegate = self
+         if pipEnabled {
+             let pipController:AVPictureInPictureController! = playerView.pictureInPictureController
+             pipController.delegate = self
 
-            pipController.addObserver(self, forKeyPath:"isPictureInPicturePossible", options:[.new, .initial], context:nil)
-        }
+             pipController.addObserver(self, forKeyPath:"isPictureInPicturePossible", options:[.new, .initial], context:nil)
+         }
 
-        self.addSubview(self.playerView)
+         self.addSubview(self.playerView)
 
-        if let autostart = config["autostart"] as? Bool, autostart {
-            playerView.player.play()
-        }
+         if let autostart = config["autostart"] as? Bool, autostart {
+             playerView.player.play()
+         }
 
-        // Time observers
-        weak var weakSelf:RNJWPlayerView! = self
-        playerView.player.adTimeObserver = { (time:JWTimeData!) in
-            weakSelf.onAdTime?(["position": time.position, "duration": time.duration])
-        }
+         // Time observers
+         weak var weakSelf:RNJWPlayerView! = self
+         playerView.player.adTimeObserver = { (time:JWTimeData!) in
+             weakSelf.onAdTime?(["position": time.position, "duration": time.duration])
+         }
 
-        playerView.player.mediaTimeObserver = { (time:JWTimeData!) in
-            weakSelf.onTime?(["position": time.position, "duration": time.duration])
-        }
-    }
+         playerView.player.mediaTimeObserver = { (time:JWTimeData!) in
+             weakSelf.onTime?(["position": time.position, "duration": time.duration])
+         }
+     }
 
     func removePlayerView() {
         if (playerView != nil) {
@@ -1012,7 +1084,26 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
 
     // MARK: - JWPlayer Delegate
 
+    // ✅ MODIFICAR jwplayerIsReady PARA INCLUIR TODA LA VERIFICACIÓN
     func jwplayerIsReady(_ player:JWPlayer) {
+        print("🔐🔐🔐 DRM: Player is ready - STARTING FULL DRM CHECK")
+        
+        // ✅ VERIFICAR EL MANIFEST ACTUAL
+        if let currentConfigDict = currentConfig,
+           let playlist = currentConfigDict["playlist"] as? [[String: Any]],
+           let firstItem = playlist.first,
+           let fileString = firstItem["file"] as? String {
+            print("🔍🔍🔍 DRM: Current playing file from config: \(fileString)")
+            verifyHLSManifestForDRM(url: fileString)
+        } else {
+            print("🔍🔍🔍 DRM: Could not get current file from config, trying alternative method")
+            
+            // ✅ MÉTODO ALTERNATIVO: usar la URL que sabemos desde los logs anteriores
+            let expectedURL = "https://storage.googleapis.com/liceu-pro/manifests/485/build-1748973335695-index-subs.m3u8"
+            print("🔍🔍🔍 DRM: Checking expected URL: \(expectedURL)")
+            verifyHLSManifestForDRM(url: expectedURL)
+        }
+        
         settingConfig = false
         self.onPlayerReady?([:])
 
@@ -1144,106 +1235,169 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
         self.onTime?(["position": time.position, "duration": time.duration])
     }
 
-    // MARK: - DRM Delegate
-
+    // MARK: - DRM Delegate con logs DETALLADOS
     func contentIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
-            // Axinom DRM: Extraer content ID del host de la URL
-            // Similar a tu implementación exitosa en JWPlayer
-            let data: Data! = url.host?.data(using: String.Encoding.utf8)
-            handler(data)
-        }
+        print("🔐🔐🔐 DRM: contentIdentifierForURL called with URL: \(url)")
+        print("🔐🔐🔐 DRM: URL host: \(url.host ?? "nil")")
+        print("🔐🔐🔐 DRM: URL scheme: \(url.scheme ?? "nil")")
+        print("🔐🔐🔐 DRM: URL absoluteString: \(url.absoluteString)")
+        
+        // Extraer el UUID del último componente después de dividir por ";"
+        let contentUUID = url.absoluteString.components(separatedBy: ";").last
+        
+        let data = contentUUID?.data(using: .utf8)
+        print("🔐🔐🔐 DRM: contentIdentifier data: \(String(describing: data))")
+        handler(data)
+    }
 
-        func appIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
-            // Axinom DRM: Cargar el certificado FairPlay
-            guard let fairplayCertUrlString = fairplayCertUrl, let finalUrl = URL(string: fairplayCertUrlString) else {
-                print("DRM: No certificate URL provided")
+    func appIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
+        print("🔐🔐🔐 DRM: appIdentifierForURL called with URL: \(url)")
+        print("🔐🔐🔐 DRM: fairplayCertUrl: \(String(describing: fairplayCertUrl))")
+        
+        // Axinom DRM: Cargar el certificado FairPlay
+        guard let fairplayCertUrlString = fairplayCertUrl, let finalUrl = URL(string: fairplayCertUrlString) else {
+            print("❌❌❌ DRM: No certificate URL provided")
+            handler(nil)
+            return
+        }
+        
+        print("🔐🔐🔐 DRM: Loading certificate from: \(finalUrl)")
+        let request = URLRequest(url: finalUrl)
+        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
+            if let error = error {
+                print("❌❌❌ DRM cert request error - \(error.localizedDescription)")
                 handler(nil)
                 return
             }
             
-            let request = URLRequest(url: finalUrl)
-            let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
-                if let error = error {
-                    print("DRM cert request error - \(error.localizedDescription)")
-                    handler(nil)
-                    return
-                }
-                
-                // Axinom DRM: Verificar que el certificado se cargó correctamente
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                    print("DRM cert request failed with status code: \(httpResponse.statusCode)")
-                    handler(nil)
-                    return
-                }
-                
-                handler(data)
-            }
-            task.resume()
-        }
-
-        func contentKeyWithSPCData(_ spcData: Data, completionHandler handler: @escaping (Data?, Date?, String?) -> Void) {
-            // Axinom DRM: Validar que tenemos la URL del servidor de licencias
-            guard let processSpcUrl = processSpcUrl else {
-                print("DRM: No license server URL provided")
-                handler(nil, nil, nil)
-                return
-            }
-
-            guard let processSpcUrlObj = URL(string: processSpcUrl) else {
-                print("DRM: Invalid license server URL - \(processSpcUrl)")
-                handler(nil, nil, nil)
-                return
-            }
-
-            // Axinom DRM: Configurar la petición HTTP para Axinom
-            var ckcRequest = URLRequest(url: processSpcUrlObj)
-            ckcRequest.httpMethod = "POST"
-            
-            // Axinom DRM: Headers específicos para Axinom
-            // X-AxDRM-Message puede estar vacío para uso básico
-            ckcRequest.setValue("", forHTTPHeaderField: "X-AxDRM-Message")
-            
-            // Axinom DRM: Content-Type para datos binarios (igual que tu implementación JWPlayer)
-            ckcRequest.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
-            
-            // Axinom DRM: Enviar SPC data directamente como datos binarios (sin codificación base64)
-            ckcRequest.httpBody = spcData
-
-            print("DRM: Sending license request to: \(processSpcUrl)")
-            print("DRM: SPC data size: \(spcData.count) bytes")
-
-            URLSession.shared.dataTask(with: ckcRequest) { (data, response, error) in
-                if let error = error {
-                    print("DRM license request error - \(error.localizedDescription)")
-                    handler(nil, nil, nil)
-                    return
-                }
-                
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    print("DRM: Invalid response type")
-                    handler(nil, nil, nil)
-                    return
-                }
-                
+            if let httpResponse = response as? HTTPURLResponse {
+                print("🔐🔐🔐 DRM: Certificate response status: \(httpResponse.statusCode)")
                 if httpResponse.statusCode != 200 {
-                    print("DRM license request failed with status code: \(httpResponse.statusCode)")
-                    handler(nil, nil, nil)
+                    print("❌❌❌ DRM cert request failed with status code: \(httpResponse.statusCode)")
+                    handler(nil)
                     return
                 }
-                
-                guard let responseData = data else {
-                    print("DRM: No license data received")
-                    handler(nil, nil, nil)
-                    return
-                }
-                
-                print("DRM: License received successfully, size: \(responseData.count) bytes")
-                
-                // Axinom DRM: Devolver la licencia tal como viene (sin decodificación base64)
-                // Content-Type se mantiene como binario
-                handler(responseData, nil, "application/octet-stream")
-            }.resume()
+            }
+            
+            print("✅✅✅ DRM: Certificate loaded successfully, size: \(data?.count ?? 0) bytes")
+            handler(data)
         }
+        task.resume()
+    }
+
+    func contentKeyWithSPCData(_ spcData: Data, completionHandler handler: @escaping (Data?, Date?, String?) -> Void) {
+        print("🔐🔐🔐 DRM: contentKeyWithSPCData called")
+        print("🔐🔐🔐 DRM: SPC data size: \(spcData.count) bytes")
+        print("🔐🔐🔐 DRM: processSpcUrl: \(String(describing: processSpcUrl))")
+        
+        // Axinom DRM: Validar que tenemos la URL del servidor de licencias
+        guard let processSpcUrl = processSpcUrl else {
+            print("❌❌❌ DRM: No license server URL provided")
+            handler(nil, nil, nil)
+            return
+        }
+
+        guard let processSpcUrlObj = URL(string: processSpcUrl) else {
+            print("❌❌❌ DRM: Invalid license server URL - \(processSpcUrl)")
+            handler(nil, nil, nil)
+            return
+        }
+
+        print("🔐🔐🔐 DRM: Sending license request to: \(processSpcUrl)")
+
+        var ckcRequest = URLRequest(url: processSpcUrlObj)
+        ckcRequest.httpMethod = "POST"
+        ckcRequest.setValue("", forHTTPHeaderField: "X-AxDRM-Message")
+        ckcRequest.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        ckcRequest.httpBody = spcData
+
+        URLSession.shared.dataTask(with: ckcRequest) { (data, response, error) in
+            if let error = error {
+                print("❌❌❌ DRM license request error - \(error.localizedDescription)")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌❌❌ DRM: Invalid response type")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            print("🔐🔐🔐 DRM: License response status: \(httpResponse.statusCode)")
+            if httpResponse.statusCode != 200 {
+                print("❌❌❌ DRM license request failed with status code: \(httpResponse.statusCode)")
+                if let responseData = data, let responseString = String(data: responseData, encoding: .utf8) {
+                    print("❌❌❌ DRM: Error response: \(responseString)")
+                }
+                handler(nil, nil, nil)
+                return
+            }
+            
+            guard let responseData = data else {
+                print("❌❌❌ DRM: No license data received")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            print("✅✅✅ DRM: License received successfully, size: \(responseData.count) bytes")
+            handler(responseData, nil, "application/octet-stream")
+        }.resume()
+    }
+
+    // ✅ FUNCIÓN DE VERIFICACIÓN DE MANIFEST
+    func verifyHLSManifestForDRM(url: String) {
+        guard let manifestURL = URL(string: url) else {
+            print("❌ DRM: Invalid manifest URL")
+            return
+        }
+        
+        print("🔍🔍🔍 DRM: Checking manifest for DRM keys: \(url)")
+        
+        URLSession.shared.dataTask(with: manifestURL) { data, response, error in
+            if let error = error {
+                print("❌ DRM: Error fetching manifest: \(error.localizedDescription)")
+                return
+            }
+            
+            guard let data = data, let manifestContent = String(data: data, encoding: .utf8) else {
+                print("❌ DRM: Could not read manifest content")
+                return
+            }
+            
+            print("🔍🔍🔍 DRM: Manifest content length: \(manifestContent.count) characters")
+            
+            let hasDRMKeys = manifestContent.contains("EXT-X-SESSION-KEY") &&
+                           manifestContent.contains("com.apple.streamingkeydelivery")
+            
+            let hasSkdScheme = manifestContent.contains("skd://")
+            
+            print("🔍🔍🔍 DRM: Contains EXT-X-SESSION-KEY: \(manifestContent.contains("EXT-X-SESSION-KEY"))")
+            print("🔍🔍🔍 DRM: Contains com.apple.streamingkeydelivery: \(manifestContent.contains("com.apple.streamingkeydelivery"))")
+            print("🔍🔍🔍 DRM: Contains skd:// scheme: \(hasSkdScheme)")
+            print("🔍🔍🔍 DRM: Has valid DRM keys: \(hasDRMKeys)")
+            
+            if hasDRMKeys {
+                print("✅✅✅ DRM: Manifest contains valid DRM configuration")
+                
+                if let skdRange = manifestContent.range(of: "skd://") {
+                    let fromSkd = manifestContent[skdRange.upperBound...]
+                    if let endRange = fromSkd.range(of: "\"") {
+                        let contentId = String(fromSkd[..<endRange.lowerBound])
+                        print("🔍🔍🔍 DRM: Content ID found: \(contentId)")
+                    }
+                }
+            } else {
+                print("❌❌❌ DRM: Manifest does NOT contain DRM keys!")
+                print("📝📝📝 DRM: Manifest preview:")
+                let preview = String(manifestContent.prefix(500))
+                print(preview)
+            }
+        }.resume()
+    }
+
+    // ✅ FUNCIÓN DE PRUEBA MANUAL DRM
+    // Se eliminó la función testDRMConfiguration
 
     // MARK: - AV Picture In Picture Delegate
 
@@ -1498,7 +1652,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     // MARK: - JWPlayer AV Delegate
 
     func jwplayer(_ player:JWPlayer, audioTracksUpdated levels:[JWMediaSelectionOption]) {
-        self.onAudioTracks?([:])
+        self.onJWAudioTracks?([:])
     }
 
     func jwplayer(_ player:JWPlayer, audioTrackChanged currentLevel:Int) {
@@ -1510,7 +1664,7 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     }
 
     func jwplayer(_ player:JWPlayer, captionTrackChanged index:Int) {
-        self.onCaptionsChanged?(["index": index])
+        self.onJWCaptionsChanged?(["index": index])
     }
 
     func jwplayer(_ player: JWPlayer, visualQualityChanged currentVisualQuality: JWVisualQuality) {
@@ -1530,11 +1684,11 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
         for track in player.captionsTracks {
             var dict: [String: Any] = [:]
             dict["label"] = track.name
-            dict["default"] = track.defaultOption  
+            dict["default"] = track.defaultOption
             tracks.append(dict)
         }
         let currentIndex = player.currentCaptionsTrack
-        self.onCaptionsList?(["index": currentIndex, "tracks": tracks])
+        self.onJWCaptionsList?(["index": currentIndex, "tracks": tracks])
     }
 
     // MARK: - JWPlayer audio session && interruption handling

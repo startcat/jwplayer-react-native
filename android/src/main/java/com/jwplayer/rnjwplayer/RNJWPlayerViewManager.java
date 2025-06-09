@@ -156,15 +156,15 @@ public class RNJWPlayerViewManager extends SimpleViewManager<RNJWPlayerView> {
             .put("topAudioTracks",
                     MapBuilder.of(
                             "phasedRegistrationNames",
-                            MapBuilder.of("bubbled", "onAudioTracks")))
+                            MapBuilder.of("bubbled", "onJWAudioTracks")))
             .put("topCaptionsChanged",
                     MapBuilder.of(
                             "phasedRegistrationNames",
-                            MapBuilder.of("bubbled", "onCaptionsChanged")))
+                            MapBuilder.of("bubbled", "onJWCaptionsChanged")))
             .put("topCaptionsList",
                     MapBuilder.of(
                             "phasedRegistrationNames",
-                            MapBuilder.of("bubbled", "onCaptionsList")))
+                            MapBuilder.of("bubbled", "onJWCaptionsList")))
             .put("topCasting",
                     MapBuilder.of(
                             "phasedRegistrationNames",

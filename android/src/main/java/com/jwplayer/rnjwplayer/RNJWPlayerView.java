@@ -145,7 +145,7 @@ public class RNJWPlayerView extends RelativeLayout implements
         VideoPlayerEvents.OnPlaylistListener,
         VideoPlayerEvents.OnPlaylistItemListener,
         VideoPlayerEvents.OnPlaylistCompleteListener,
-        VideoPlayerEvents.OnAudioTracksListener,
+        VideoPlayerEvents.onJWAudioTracksListener,
         VideoPlayerEvents.OnAudioTrackChangedListener,
         VideoPlayerEvents.OnControlsListener,
         VideoPlayerEvents.OnControlBarVisibilityListener,
@@ -154,8 +154,8 @@ public class RNJWPlayerView extends RelativeLayout implements
         VideoPlayerEvents.OnSeekListener,
         VideoPlayerEvents.OnSeekedListener,
         VideoPlayerEvents.OnPlaybackRateChangedListener,
-        VideoPlayerEvents.OnCaptionsListListener,
-        VideoPlayerEvents.OnCaptionsChangedListener,
+        VideoPlayerEvents.onJWCaptionsListListener,
+        VideoPlayerEvents.onJWCaptionsChangedListener,
         VideoPlayerEvents.OnMetaListener,
         VideoPlayerEvents.PlaylistItemCallbackListener,
 
@@ -1559,9 +1559,9 @@ public class RNJWPlayerView extends RelativeLayout implements
     // Audio Events
 
     @Override
-    public void onAudioTracks(AudioTracksEvent audioTracksEvent) {
+    public void onJWAudioTracks(AudioTracksEvent audioTracksEvent) {
         WritableMap event = Arguments.createMap();
-        event.putString("message", "onAudioTracks");
+        event.putString("message", "onJWAudioTracks");
         getReactContext().getJSModule(RCTEventEmitter.class).receiveEvent(getId(), "topAudioTracks", event);
     }
 
@@ -1573,15 +1573,15 @@ public class RNJWPlayerView extends RelativeLayout implements
     // Captions Events
 
     @Override
-    public void onCaptionsChanged(CaptionsChangedEvent captionsChangedEvent) {
+    public void onJWCaptionsChanged(CaptionsChangedEvent captionsChangedEvent) {
         WritableMap event = Arguments.createMap();
-        event.putString("message", "onCaptionsChanged");
+        event.putString("message", "onJWCaptionsChanged");
         event.putInt("index", captionsChangedEvent.getCurrentTrack());
         getReactContext().getJSModule(RCTEventEmitter.class).receiveEvent(getId(), "topCaptionsChanged", event);
     }
 
     @Override
-    public void onCaptionsList(CaptionsListEvent captionsListEvent) {
+    public void onJWCaptionsList(CaptionsListEvent captionsListEvent) {
         WritableMap event = Arguments.createMap();
         List<Caption> captionTrackList = captionsListEvent.getCaptions();
         WritableArray captionTracks = Arguments.createArray();
@@ -1595,7 +1595,7 @@ public class RNJWPlayerView extends RelativeLayout implements
                 captionTracks.pushMap(captionTrack);
             }
         }
-        event.putString("message", "onCaptionsList");
+        event.putString("message", "onJWCaptionsList");
         event.putInt("index", captionsListEvent.getCurrentCaptionIndex());
         event.putArray("tracks", captionTracks);
         getReactContext().getJSModule(RCTEventEmitter.class).receiveEvent(getId(), "topCaptionsList", event);

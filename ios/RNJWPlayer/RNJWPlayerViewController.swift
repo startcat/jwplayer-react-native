@@ -26,12 +26,24 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
         self.fullScreenDelegate = self
         self.uiDelegate = self
         self.relatedDelegate = self
-//        self.playerView.delegate = self
-//        self.player.delegate = self
-//        self.player.playbackStateDelegate = self
-//        self.player.adDelegate = self
-//        self.player.avDelegate = self
-        self.player.contentKeyDataSource = self
+        
+        // ✅ CONFIGURAR EL contentKeyDataSource CORRECTAMENTE
+        if let parentView = self.parentView {
+            print("🔐🔐🔐 DRM: Setting contentKeyDataSource in RNJWPlayerViewController to parentView")
+            self.player.contentKeyDataSource = parentView
+            print("🔐🔐🔐 DRM: contentKeyDataSource set successfully: \(self.player.contentKeyDataSource != nil)")
+            
+            // ✅ VERIFICAR QUE EL PARENT VIEW TENGA LAS URLs DE DRM
+            if let processSpcUrl = parentView.processSpcUrl, let fairplayCertUrl = parentView.fairplayCertUrl {
+                print("🔐🔐🔐 DRM: Parent view has DRM URLs - processSpcUrl: \(processSpcUrl), fairplayCertUrl: \(fairplayCertUrl)")
+            } else {
+                print("⚠️⚠️⚠️ DRM: Parent view missing DRM URLs")
+                print("⚠️⚠️⚠️ DRM: processSpcUrl: \(String(describing: parentView.processSpcUrl))")
+                print("⚠️⚠️⚠️ DRM: fairplayCertUrl: \(String(describing: parentView.fairplayCertUrl))")
+            }
+        } else {
+            print("❌❌❌ DRM: parentView is nil, cannot set contentKeyDataSource")
+        }
     }
 
     func removeDelegates() {
@@ -48,27 +60,62 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
 
     // MARK: - JWPlayer Delegate
 
+    // ✅ OVERRIDE jwplayerIsReady PARA DEBUGGING COMPLETO
     override func jwplayerIsReady(_ player:JWPlayer) {
-        super.jwplayerIsReady(player)
-
-        parentView?.settingConfig = false
-        parentView?.onPlayerReady?([:])
-
-        if parentView?.pendingConfig == true && (parentView?.currentConfig != nil) {
-            parentView?.setConfig(parentView!.currentConfig)
+        print("🔐🔐🔐 DRM: RNJWPlayerViewController - Player is ready - STARTING FULL DRM CHECK")
+        print("🔐🔐🔐 DRM: contentKeyDataSource is set: \(player.contentKeyDataSource != nil)")
+        print("🔐🔐🔐 DRM: contentKeyDataSource is parentView: \(player.contentKeyDataSource === parentView)")
+        
+        if let parentView = parentView {
+            print("🔐🔐🔐 DRM: processSpcUrl: \(String(describing: parentView.processSpcUrl))")
+            print("🔐🔐🔐 DRM: fairplayCertUrl: \(String(describing: parentView.fairplayCertUrl))")
+            
+            // ✅ VERIFICAR EL MANIFEST ACTUAL
+            if let currentConfigDict = parentView.currentConfig,
+               let playlist = currentConfigDict["playlist"] as? [[String: Any]],
+               let firstItem = playlist.first,
+               let fileString = firstItem["file"] as? String {
+                print("🔍🔍🔍 DRM: Current playing file from config: \(fileString)")
+                parentView.verifyHLSManifestForDRM(url: fileString)
+            } else {
+                print("🔍🔍🔍 DRM: Could not get current file from config")
+            }
+            
+            // Se eliminaron las esperas y pruebas DRM para mejorar el flujo
         }
+
+        super.jwplayerIsReady(player)
     }
 
+    // ✅ OVERRIDE LOS MÉTODOS DE ERROR PARA DETECTAR FALLOS DRM
     override func jwplayer(_ player:JWPlayer, failedWithError code:UInt, message:String) {
-        super.jwplayer(player, failedWithError:code, message:message)
-        parentView?.onPlayerError?(["error": message, "errorCode": code])
-        parentView?.playerFailed = true
+        print("❌❌❌ DRM: RNJWPlayerViewController - Player failed with error")
+        print("❌❌❌ DRM: Error Code: \(code)")
+        print("❌❌❌ DRM: Error Message: \(message)")
+        print("❌❌❌ DRM: contentKeyDataSource was set: \(player.contentKeyDataSource != nil)")
+        print("❌❌❌ DRM: contentKeyDataSource was parentView: \(player.contentKeyDataSource === parentView)")
+        
+        // ✅ VERIFICAR SI EL ERROR ESTÁ RELACIONADO CON DRM
+        let lowerMessage = message.lowercased()
+        if lowerMessage.contains("drm") || lowerMessage.contains("license") ||
+           lowerMessage.contains("key") || lowerMessage.contains("certificate") ||
+           lowerMessage.contains("fairplay") || lowerMessage.contains("widevine") {
+            print("❌❌❌ DRM: Error appears to be DRM-related!")
+        } else {
+            print("❌❌❌ DRM: Error does not appear to be DRM-related")
+            print("❌❌❌ DRM: This might be a network, format, or configuration issue")
+        }
+        
+        super.jwplayer(player, failedWithError: code, message: message)
     }
 
     override func jwplayer(_ player:JWPlayer, failedWithSetupError code:UInt, message:String) {
-        super.jwplayer(player, failedWithSetupError:code, message:message)
-        parentView?.onSetupPlayerError?(["errorMessage": message, "errorCode": code])
-        parentView?.playerFailed = true
+        print("❌❌❌ DRM: RNJWPlayerViewController - Player failed with setup error")
+        print("❌❌❌ DRM: Setup Error Code: \(code)")
+        print("❌❌❌ DRM: Setup Error Message: \(message)")
+        print("❌❌❌ DRM: This might be a configuration issue preventing DRM from working")
+        
+        super.jwplayer(player, failedWithSetupError: code, message: message)
     }
 
     override func jwplayer(_ player:JWPlayer, encounteredWarning code:UInt, message:String) {
@@ -196,26 +243,53 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
     // MARK: - DRM Delegate
 
     func contentIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
-        let data:Data! = url.host?.data(using: String.Encoding.utf8)
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] contentIdentifierForURL called with URL: \(url)")
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] URL host: \(url.host ?? "nil")")
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] URL scheme: \(url.scheme ?? "nil")")
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] URL absoluteString: \(url.absoluteString)")
+        
+        // Extraer el UUID del último componente después de dividir por ";"
+        let contentUUID = url.absoluteString.components(separatedBy: ";").last
+        
+        let data = contentUUID?.data(using: .utf8)
+        print("🔐🔐🔐 DRM: contentIdentifier data: \(String(describing: data))")
         handler(data)
     }
 
     func appIdentifierForURL(_ url: URL, completionHandler handler: @escaping (Data?) -> Void) {
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] appIdentifierForURL called with URL: \(url)")
         guard let fairplayCertUrlString = parentView?.fairplayCertUrl, let fairplayCertUrl = URL(string: fairplayCertUrlString) else {
+            print("❌❌❌ DRM: [RNJWPlayerViewController] No certificate URL provided")
+            handler(nil)
             return
         }
-
+        
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] Loading certificate from: \(fairplayCertUrl)")
         let request = URLRequest(url: fairplayCertUrl)
         let task = URLSession.shared.dataTask(with: request) { (data, response, error) in
             if let error = error {
-                print("DRM cert request error - \(error.localizedDescription)")
+                print("❌❌❌ DRM [RNJWPlayerViewController] cert request error - \(error.localizedDescription)")
+                handler(nil)
+                return
             }
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("🔐🔐🔐 DRM: Certificate response status: \(httpResponse.statusCode)")
+                if httpResponse.statusCode != 200 {
+                    print("❌❌❌ DRM [RNJWPlayerViewController] cert request failed with status code: \(httpResponse.statusCode)")
+                    handler(nil)
+                    return
+                }
+            }
+            
+            print("✅✅✅ DRM: [RNJWPlayerViewController] Certificate loaded successfully, size: \(data?.count ?? 0) bytes")
             handler(data)
         }
         task.resume()
     }
 
     func contentKeyWithSPCData(_ spcData: Data, completionHandler handler: @escaping (Data?, Date?, String?) -> Void) {
+        /*
         if parentView?.processSpcUrl == nil {
             return
         }
@@ -236,6 +310,64 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
                 handler(data, nil, "application/octet-stream")
             }.resume()
         }
+        */
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] contentKeyWithSPCData called")
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] SPC data size: \(spcData.count) bytes")
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] processSpcUrl: \(String(describing: parentView?.processSpcUrl))")
+        
+        // Axinom DRM: Validar que tenemos la URL del servidor de licencias
+        guard let processSpcUrl = parentView?.processSpcUrl else {
+            print("❌❌❌ DRM: [RNJWPlayerViewController] No license server URL provided")
+            handler(nil, nil, nil)
+            return
+        }
+
+        guard let processSpcUrlObj = URL(string: processSpcUrl) else {
+            print("❌❌❌ DRM: [RNJWPlayerViewController] Invalid license server URL - \(processSpcUrl)")
+            handler(nil, nil, nil)
+            return
+        }
+
+        print("🔐🔐🔐 DRM: [RNJWPlayerViewController] Sending license request to: \(processSpcUrl)")
+
+        var ckcRequest = URLRequest(url: processSpcUrlObj)
+        ckcRequest.httpMethod = "POST"
+        ckcRequest.setValue("", forHTTPHeaderField: "X-AxDRM-Message")
+        ckcRequest.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        ckcRequest.httpBody = spcData
+
+        URLSession.shared.dataTask(with: ckcRequest) { (data, response, error) in
+            if let error = error {
+                print("❌❌❌ DRM [RNJWPlayerViewController] license request error - \(error.localizedDescription)")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            guard let httpResponse = response as? HTTPURLResponse else {
+                print("❌❌❌ DRM: [RNJWPlayerViewController] Invalid response type")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            print("🔐🔐🔐 DRM: [RNJWPlayerViewController] License response status: \(httpResponse.statusCode)")
+            if httpResponse.statusCode != 200 {
+                print("❌❌❌ DRM [RNJWPlayerViewController] license request failed with status code: \(httpResponse.statusCode)")
+                if let responseData = data, let responseString = String(data: responseData, encoding: .utf8) {
+                    print("❌❌❌ DRM: [RNJWPlayerViewController] Error response: \(responseString)")
+                }
+                handler(nil, nil, nil)
+                return
+            }
+            
+            guard let responseData = data else {
+                print("❌❌❌ DRM: [RNJWPlayerViewController] No license data received")
+                handler(nil, nil, nil)
+                return
+            }
+            
+            print("✅✅✅ DRM: [RNJWPlayerViewController] License received successfully, size: \(responseData.count) bytes")
+            handler(responseData, nil, "application/octet-stream")
+        }.resume()
     }
 
     // MARK: - AV Picture In Picture Delegate
@@ -274,6 +406,7 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
     // MARK: - JWPlayer State Delegate
 
     override func jwplayer(_ player:JWPlayer, isBufferingWithReason reason:JWBufferReason) {
+        print("⏳ DRM: RNJWPlayerViewController - Player buffering")
         super.jwplayer(player, isBufferingWithReason:reason)
         parentView?.onBuffer?([:])
     }
@@ -294,6 +427,8 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
     }
 
     override func jwplayer(_ player:JWPlayer, isPlayingWithReason reason:JWPlayReason) {
+        print("✅✅✅ DRM: RNJWPlayerViewController - Player started playing!")
+        print("✅✅✅ DRM: DRM successful or content doesn't need DRM!")
         super.jwplayer(player, isPlayingWithReason:reason)
 
         parentView?.onPlay?([:])
@@ -308,6 +443,7 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
     }
 
     override func jwplayer(_ player:JWPlayer, didPauseWithReason reason:JWPauseReason) {
+        print("⏸️ DRM: RNJWPlayerViewController - Player paused")
         super.jwplayer(player, didPauseWithReason:reason)
         parentView?.onPause?([:])
 
@@ -580,7 +716,7 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
 
     override func jwplayer(_ player:JWPlayer, audioTracksUpdated levels:[JWMediaSelectionOption]) {
         super.jwplayer(player, audioTracksUpdated:levels)
-        parentView?.onAudioTracks?([:])
+        parentView?.onJWAudioTracks?([:])
     }
 
     override func jwplayer(_ player:JWPlayer, audioTrackChanged currentLevel:Int) {
@@ -593,7 +729,7 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
 
     override func jwplayer(_ player:JWPlayer, captionTrackChanged index:Int) {
         super.jwplayer(player, captionTrackChanged:index)
-        parentView.onCaptionsChanged?(["index": index])
+        parentView.onJWCaptionsChanged?(["index": index])
     }
 
     override func jwplayer(_ player:JWPlayer, qualityLevelChanged currentLevel:Int) {
@@ -615,7 +751,7 @@ class RNJWPlayerViewController : JWPlayerViewController, JWPlayerViewControllerF
             tracks.append(dict)
         }
         let currentIndex = player.currentCaptionsTrack
-        parentView.onCaptionsList?(["index": currentIndex, "tracks": tracks])
+        parentView.onJWCaptionsList?(["index": currentIndex, "tracks": tracks])
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {

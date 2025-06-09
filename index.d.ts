@@ -570,9 +570,9 @@ declare module "@jwplayer/jwplayer-react-native" {
     onControlBarVisible?: (event: BaseEvent<ControlBarVisibleEventProps>) => void;
     onPlaylistComplete?: () => void;
     onPlaylistItem?: (event: BaseEvent<PlaylistItemEventProps>) => void;
-    onCaptionsChanged?: (event: BaseEvent<CaptionsChangedEventProps>) => void;
-    onCaptionsList?: (event: BaseEvent<CaptionsListEventProps>) => void;
-    onAudioTracks?: () => void;
+    onJWCaptionsChanged?: (event: BaseEvent<CaptionsChangedEventProps>) => void;
+    onJWCaptionsList?: (event: BaseEvent<CaptionsListEventProps>) => void;
+    onJWAudioTracks?: () => void;
     shouldComponentUpdate?: (nextProps: any, nextState: any) => boolean;
     onBeforeNextPlaylistItem?: (event: BaseEvent<PlaylistItemEventProps>) => void;
   }
