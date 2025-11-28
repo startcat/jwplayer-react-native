@@ -37,6 +37,8 @@ declare module "@jwplayer/jwplayer-react-native" {
     landscapeOnFullScreen?: boolean;
     portraitOnExitFullScreen?: boolean;
     exitFullScreenOnPortrait?: boolean;
+    enableLockScreenControls?: boolean;
+    pipEnabled?: boolean;
   }
 
   type JwThumbnailPreview = 101 | 102 | 103;
@@ -172,6 +174,10 @@ declare module "@jwplayer/jwplayer-react-native" {
     schedule?: { [key: string]: JwAdBreak };
     imaDaiSettings?: JwImaDaiSettings;
     httpheaders?: { [key: string]: string };
+    /**
+     * Data to be passed to Chromecast receiver (optional and typically used for DRM implementations)
+     */
+    userInfo?: { [key: string]: any };
   }
 
   interface JwImaDaiSettings {
@@ -347,6 +353,12 @@ declare module "@jwplayer/jwplayer-react-native" {
     recommendations?: string;
     startTime?: number;
     autostart?: boolean;
+    /**
+     * Data to be passed to Chromecast receiver (optional and typically used for DRM implementations)
+     * 
+     * Only made available in legacy objects as there is no way to pass this otherwise
+     */
+    userInfo?: { [key: string]: any };
   }
   type RelatedOnClicks = "play" | "link";
   type RelatedOnCompletes = "show" | "hide" | "autoplay";
@@ -371,11 +383,15 @@ declare module "@jwplayer/jwplayer-react-native" {
       buttons?: string;
       backgroundColor?: string;
       fontColor?: string;
-      timeslider?: { progress?: string; rail?: string; thumb?: string };
+      timeslider?: { 
+        thumb?: string;
+        rail?: string;
+        slider?: string;
+      };
     };
     font?: Font;
-    displayTitle?: boolean;
-    displayDescription?: boolean;
+    showTitle?: boolean;
+    showDesc?: boolean;
     captionsStyle?: {
       font?: Font;
       fontColor?: string;
@@ -383,7 +399,7 @@ declare module "@jwplayer/jwplayer-react-native" {
       highlightColor?: string;
       edgeStyle?: EdgeStyles;
     };
-    menuStyle: {
+    menuStyle?: {
       font?: Font;
       fontColor?: string;
       backgroundColor?: string;
@@ -470,8 +486,12 @@ declare module "@jwplayer/jwplayer-react-native" {
     fairplayCertUrl?: string;
     contentUUID?: string;
     viewOnly?: boolean;
-    enableLockScreenControls: boolean;
-    pipEnabled: boolean;
+    enableLockScreenControls?: boolean;
+    pipEnabled?: boolean;
+    offlineMessage?: string;
+    offlineImage?: string;
+    forceFullScreenOnLandscape?: boolean;
+    forceLandscapeOnFullScreen?: boolean;
   }
   interface BaseEvent<T> {
     nativeEvent: T;
@@ -577,7 +597,54 @@ declare module "@jwplayer/jwplayer-react-native" {
     onBeforeNextPlaylistItem?: (event: BaseEvent<PlaylistItemEventProps>) => void;
   }
 
+  export const JWPlayerAdEvents: {
+    /// This event is reported when the ad break has come to an end.
+    JWAdEventTypeAdBreakEnd: 0;
+    /// This event is reported when the ad break has begun.
+    JWAdEventTypeAdBreakStart: 1;
+    /// This event is reported when the user taps the ad.
+    JWAdEventTypeClicked: 2;
+    /// This event is reported when the ad is done playing.
+    JWAdEventTypeComplete: 3;
+    /// This event is used to report the ad impression, supplying additional detailed information about the ad.
+    JWAdEventTypeImpression: 4;
+    /// This event reports meta data information associated with the ad.
+    JWAdEventTypeMeta: 5;
+    /// The event is reported when the ad pauses.
+    JWAdEventTypePause: 6;
+    /// This event is reported when the ad begins playing, even in the middle of the stream after it was paused.
+    JWAdEventTypePlay: 7;
+    /// The event reports data about the ad request, when the ad is about to be loaded.
+    JWAdEventTypeRequest: 8;
+    /// This event reports the schedule of ads across the currently playing content.
+    JWAdEventTypeSchedule: 9;
+    /// This event is reported when the user skips the ad.
+    JWAdEventTypeSkipped: 10;
+    /// This event is reported when the ad begins.
+    JWAdEventTypeStarted: 11;
+    /// This event relays information about ad companions.
+    JWAdEventTypeCompanion: 12;
+  };
+
+  export const JWPlayerState: {
+    JWPlayerStateUnknown?: number;
+    JWPlayerStateIdle: number;
+    JWPlayerStateBuffering: number;
+    JWPlayerStatePlaying: number;
+    JWPlayerStatePaused: number;
+    JWPlayerStateComplete: number;
+    JWPlayerStateError: number | null;
+  };
+
+  export const JWPlayerAdClients: {
+    JWAdClientJWPlayer: 0;
+    JWAdClientGoogleIMA: 1;
+    JWAdClientGoogleIMADAI: 2;
+    JWAdClientUnknown: 3;
+  };
+
   export default class JWPlayer extends React.Component<PropsType> {
+    quite(): void;
     pause(): void;
     play(): void;
     stop(): void;
@@ -591,6 +658,7 @@ declare module "@jwplayer/jwplayer-react-native" {
     setControls(show: boolean): void;
     setLockScreenControls(show: boolean): void;
     seekTo(time: number): void;
+    changePlaylist(fileUrl: string): void;
     /**
      * Side load playlist items into an already setup player
      * @param playlistItems `PlaylistItem` or `JwPlaylistItem`
@@ -602,7 +670,9 @@ declare module "@jwplayer/jwplayer-react-native" {
      */
     loadPlaylistWithUrl(playlistUrl: string): void;
     setFullscreen(fullScreen: boolean): void;
-    position(): Promise<number>;
+    time(): Promise<number | null>;
+    position(): Promise<number | null>;
+    togglePIP(): void;
     setUpCastController(): void;
     presentCastDialog(): void;
     connectedDevice(): Promise<CastingDevice | null>;
@@ -615,6 +685,57 @@ declare module "@jwplayer/jwplayer-react-native" {
     setCurrentCaptions(index: number): void;
     getCurrentCaptions(): Promise<number | null>; 
     setVisibility(visibility: boolean, controls: JWControlType[]): void;
+    /**
+     * Recreates the player with a new configuration, handling cleanup and PiP state.
+     * 
+     * NOTE: This method is only available on iOS. On Android, create a new player instance
+     * with the new configuration instead.
+     * 
+     * IMPORTANT: This method should only be called after the player has been properly
+     * initialized and is ready (i.e., after onPlayerReady has fired). Calling this
+     * method before the player is ready may lead to undefined behavior.
+     * 
+     * This method performs a complete player recreation by:
+     * 1. Safely handling PiP state if active (waits for PiP to close)
+     * 2. Performing complete cleanup of the current player instance
+     * 3. Creating a new player instance with the provided config
+     * 
+     * Use this method when you need to:
+     * - Switch between different DRM configurations
+     * - Handle content changes during PiP mode
+     * - Force a complete player recreation
+     * 
+     * Do NOT use this method:
+     * - Before the player is ready (wait for onPlayerReady)
+     * - For simple playlist updates (use loadPlaylist instead)
+     * - When the player is not properly initialized
+     * - On Android (create a new player instance instead)
+     * 
+     * @example
+     * ```typescript
+     * // Wait for player to be ready
+     * onPlayerReady={() => {
+     *   // Now safe to use recreatePlayerWithConfig (iOS only)
+     *   if (Platform.OS === 'ios') {
+     *     playerRef.current?.recreatePlayerWithConfig({
+     *       ...config,
+     *       playlist: newPlaylist
+     *     });
+     *   } else {
+     *     // On Android, create a new player instance
+     *     setPlayerConfig({
+     *       ...config,
+     *       playlist: newPlaylist
+     *     });
+     *   }
+     * }}
+     * ```
+     * 
+     * @platform ios
+     * @param config The new configuration to apply to the recreated player
+     * @throws May throw if called before player is ready or with invalid config
+     */
+    recreatePlayerWithConfig(config: Config | JwConfig): void;
     /**
      * Only called inside `onBeforeNextPlaylistItem` callback, and once per callback
      * @param playlistItem  `PlaylistItem` or  `JwPlaylistItem`

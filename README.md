@@ -275,11 +275,44 @@ Follow these steps to enable background audio sessions:
 1. Set `backgroundAudioEnabled` to `true` in the `config`.
 2. Ensure that background audio is set for [Android](https://docs.jwplayer.com/players/docs/android-enable-background-audio) or [iOS](https://docs.jwplayer.com/players/docs/ios-player-backgrounding-reference#configure-audio-playback).
 
+#### Android Opt-Out Information
+Suppose you are **not** using the background audio service on Android. In that case, you will need to modify the [manifest](https://github.com/jwplayer/jwplayer-react-native/blob/master/android/src/main/AndroidManifest.xml) from our library (either in the node_modules, or in your fork before compilation) so as not to register a service that you will never use. Google can and will reject your Play Store submission if this is skipped. See the modified manifest below, which shows what to remove (commented-out permissions and services). Additionally, once this is done, you can never set `backgroundAudioEnabled` to true on Android, or you will run into a fatal crash.
+
+```xml
+
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          package="com.jwplayer.rnjwplayer">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE" /> -->
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" /> -->
+    <!--    READ_MEDIA_IMAGES, READ_MEDIA_VIDEO or READ_MEDIA_AUDIO.-->
+
+    <application>
+        <!-- <service
+            android:name="com.jwplayer.pub.api.background.MediaService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </service> -->
+    </application>
+
+</manifest>
+  
+```
+
 <br /><br />
 
 ### Casting
 
-[Android](#android-casting) | [iOS](#ios-casting)
+[Android](#android-casting) | [iOS](#ios-casting) | [DRM Casting](#drm-casting)
 
 JWP enables casting by default with a casting button.
 
@@ -341,6 +374,13 @@ typedef NS_ENUM(NSUInteger, GCKCastState) {
   GCKCastStateConnected = 3,
 };
 ```
+
+#### DRM Casting
+Casting your DRM protected content requires some additional configuration and most likely a custom Chromecast Receiver.
+
+See our Android and iOS documentation about creating ([iOS](https://docs.jwplayer.com/players/docs/ios-create-a-custom-receiver) / [Android](https://docs.jwplayer.com/players/docs/android-create-a-custom-receiver)) and sending data ([iOS](https://docs.jwplayer.com/players/docs/ios-enable-casting-to-chromecast-devices#send-custom-data-to-a-custom-receiver) / [Android](https://docs.jwplayer.com/players/docs/android-enable-casting-to-chromecast-devices#send-custom-data-to-a-custom-receiver)) for more information.
+
+To send custom data to your receiver, use the `userInfo` prop and avoid using the reserved `sources` key, as the JWP SDK will append the DRM source information here for you to parse in your DRM enabled receiver. 
 
 <br /><br />
 
