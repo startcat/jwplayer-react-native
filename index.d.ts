@@ -2,6 +2,22 @@ declare module "@jwplayer/jwplayer-react-native" {
   import React from "react";
   import { ViewStyle } from "react-native";
 
+  interface Youbora {
+    enabled?: boolean;
+    offline?: boolean;
+    accountCode: string;
+    contentTransactionCode: string;
+    username?: string;
+    contentTitle?: string;
+    contentIsLive?: boolean;
+    program?: string;
+    contentCustomDimension1?: string;
+    contentCustomDimension2?: string;
+    contentCustomDimension3?: string;
+    contentCustomDimension4?: string;
+    contentCustomDimension5?: string;
+  }
+
   interface JwConfig {
     pid?: string;
     mute?: boolean;
@@ -39,6 +55,7 @@ declare module "@jwplayer/jwplayer-react-native" {
     exitFullScreenOnPortrait?: boolean;
     enableLockScreenControls?: boolean;
     pipEnabled?: boolean;
+    youbora?: Youbora;
   }
 
   type JwThumbnailPreview = 101 | 102 | 103;
@@ -492,6 +509,7 @@ declare module "@jwplayer/jwplayer-react-native" {
     offlineImage?: string;
     forceFullScreenOnLandscape?: boolean;
     forceLandscapeOnFullScreen?: boolean;
+    youbora?: Youbora;
   }
   interface BaseEvent<T> {
     nativeEvent: T;

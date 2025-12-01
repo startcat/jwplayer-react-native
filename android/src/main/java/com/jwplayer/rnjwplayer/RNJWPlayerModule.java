@@ -45,16 +45,21 @@ public class RNJWPlayerModule extends ReactContextBaseJavaModule {
     }
 
     private RNJWPlayerView getPlayerView(int reactTag) {
-        int uiManagerType;
-        if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
-            uiManagerType = UIManagerType.FABRIC;
-        } else {
-            uiManagerType = UIManagerType.DEFAULT;
-        }
-        UIManager uiManager = UIManagerHelper.getUIManager(mReactContext, uiManagerType);
-        if (uiManager != null) {
-            return (RNJWPlayerView) uiManager.resolveView(reactTag);
-        } else {
+        try {
+            int uiManagerType;
+            if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
+                uiManagerType = UIManagerType.FABRIC;
+            } else {
+                uiManagerType = UIManagerType.DEFAULT;
+            }
+            UIManager uiManager = UIManagerHelper.getUIManager(mReactContext, uiManagerType);
+            if (uiManager != null) {
+                return (RNJWPlayerView) uiManager.resolveView(reactTag);
+            } else {
+                return null;
+            }
+        } catch (Exception e) {
+            // View doesn't exist anymore (already destroyed)
             return null;
         }
     }
@@ -348,6 +353,19 @@ public class RNJWPlayerModule extends ReactContextBaseJavaModule {
             RNJWPlayerView playerView = getPlayerView(reactTag);
             if (playerView != null && playerView.mPlayerView != null) {
                 playerView.mPlayerView.getPlayer().setVolume(volume);
+            }
+        });
+    }
+
+    @ReactMethod
+    public void getVolume(final int reactTag, final Promise promise) {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            RNJWPlayerView playerView = getPlayerView(reactTag);
+            if (playerView != null && playerView.mPlayerView != null) {
+                int volume = playerView.mPlayerView.getPlayer().getVolume();
+                promise.resolve(volume);
+            } else {
+                promise.reject("E_PLAYER_NOT_LOADED", "Player is not loaded");
             }
         });
     }

@@ -35,10 +35,14 @@ Pod::Spec.new do |s|
   end
   if defined?($RNJWPlayerUseGoogleIMA)
     Pod::UI.puts "RNJWPlayer: enable IMA SDK"
-    s.dependency 'GoogleAds-IMA-iOS-SDK', '3.22.1'
+    s.dependency 'GoogleAds-IMA-iOS-SDK', '~> 3.28.10'
     s.pod_target_xcconfig = {
       'OTHER_SWIFT_FLAGS' => '$(inherited) -D USE_GOOGLE_IMA'
     }
   end
+  
+  # Youbora dependencies
+  s.dependency 'YouboraLib', '~> 6.7'
+  s.dependency 'YouboraJWPlayer4Adapter'
   
 end

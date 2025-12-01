@@ -558,6 +558,20 @@ export default class JWPlayer extends Component {
 		}
 	}
 
+	async getVolume() {
+		if (RNJWPlayerManager) {
+			try {
+				var volume = await RNJWPlayerManager.getVolume(
+					this.getRNJWPlayerBridgeHandle()
+				);
+				return volume;
+			} catch (e) {
+				console.error(e);
+				return null;
+			}
+		}
+	}
+
 	async time() {
 		if (RNJWPlayerManager) {
 			try {

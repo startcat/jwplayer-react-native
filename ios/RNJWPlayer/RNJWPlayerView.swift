@@ -11,6 +11,8 @@ import AVKit
 import MediaPlayer
 import React
 import JWPlayerKit
+import YouboraLib
+import YouboraJWPlayer4Adapter
 
 #if USE_GOOGLE_CAST
     import GoogleCast
@@ -47,6 +49,11 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
     var isCasting: Bool = false
     var availableDevices: [AnyObject]!
     var onBeforeNextPlaylistItemCompletion: ((JWPlayerItem?) -> ())?
+    
+    // Youbora properties
+    var youboraPlugin: YBPlugin?
+    var youboraOptions: YBOptions?
+    var youboraAdapter: YouboraWrapper?
     
     @objc var onBuffer: RCTDirectEventBlock?
     @objc var onUpdateBuffer: RCTDirectEventBlock?
@@ -1077,6 +1084,9 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
 
     func dismissPlayerViewController() {
         if (playerViewController != nil) {
+            // Cleanup Youbora before dismissing player
+            cleanupYoubora()
+            
             playerViewController.player.pause() // hack for stop not always stopping on unmount
             playerViewController.player.stop()
             playerViewController.enableLockScreenControls = false
@@ -1108,6 +1118,11 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
             playerViewController.player.configurePlayer(with: configuration)
             if (interfaceBehavior != nil) {
                 playerViewController.interfaceBehavior = interfaceBehavior
+            }
+            
+            // Setup Youbora after player configuration
+            if let config = currentConfig {
+                setupYoubora(config: config, player: playerViewController.player)
             }
         }
     }
@@ -1160,10 +1175,16 @@ class RNJWPlayerView: UIView, JWPlayerDelegate, JWPlayerStateDelegate,
          playerView.player.mediaTimeObserver = { (time:JWTimeData!) in
              weakSelf.onTime?(["position": time.position, "duration": time.duration])
          }
+         
+         // Setup Youbora after player configuration
+         setupYoubora(config: config, player: playerView.player)
      }
 
     func removePlayerView() {
         if (playerView != nil) {
+            // Cleanup Youbora before removing player
+            cleanupYoubora()
+            
             playerView.player.stop()
             playerView.removeFromSuperview()
             playerView = nil
@@ -2237,3 +2258,135 @@ extension RNJWPlayerView: JWCastDelegate {
     }
 }
 #endif
+
+// MARK: - Youbora Integration
+extension RNJWPlayerView {
+    
+    func setupYoubora(config: [String: Any], player: JWPlayerProtocol?) {
+        guard let jwPlayer = player as? JWPlayer else {
+            print("📊 Youbora: Invalid player type")
+            return
+        }
+        
+        guard let youboraConfig = config["youbora"] as? [String: Any] else {
+            print("📊 Youbora: No configuration found")
+            return
+        }
+        
+        // Clean up previous Youbora instance if exists
+        cleanupYoubora()
+        
+        // Create Youbora options
+        youboraOptions = YBOptions()
+        youboraOptions?.autoDetectBackground = true
+        youboraOptions?.offline = false
+        youboraOptions?.enabled = true
+        
+        print("📊 Youbora: Starting configuration")
+        
+        // Parse enabled flag
+        if let enabled = youboraConfig["enabled"] as? Bool {
+            youboraOptions?.enabled = enabled
+            print("📊 Youbora: enabled = \(enabled)")
+        }
+        
+        // Parse offline flag
+        if let offline = youboraConfig["offline"] as? Bool {
+            youboraOptions?.offline = offline
+            print("📊 Youbora: offline = \(offline)")
+        }
+        
+        // Parse accountCode (required)
+        if let accountCode = youboraConfig["accountCode"] as? String {
+            youboraOptions?.accountCode = accountCode
+            print("📊 Youbora: accountCode = \(accountCode)")
+        }
+        
+        // Parse contentTransactionCode (required)
+        if let contentTransactionCode = youboraConfig["contentTransactionCode"] as? String {
+            youboraOptions?.contentTransactionCode = contentTransactionCode
+            print("📊 Youbora: contentTransactionCode = \(contentTransactionCode)")
+        }
+        
+        // Parse username
+        if let username = youboraConfig["username"] as? String {
+            youboraOptions?.username = username
+            print("📊 Youbora: username = \(username)")
+        }
+        
+        // Parse contentTitle
+        if let contentTitle = youboraConfig["contentTitle"] as? String {
+            youboraOptions?.contentTitle = contentTitle
+            print("📊 Youbora: contentTitle = \(contentTitle)")
+        }
+        
+        // Parse contentIsLive
+        if let contentIsLive = youboraConfig["contentIsLive"] as? Bool {
+            youboraOptions?.contentIsLive = NSNumber(value: contentIsLive)
+            print("📊 Youbora: contentIsLive = \(contentIsLive)")
+        }
+        
+        // Parse program
+        if let program = youboraConfig["program"] as? String {
+            youboraOptions?.program = program
+            print("📊 Youbora: program = \(program)")
+        }
+        
+        // Parse custom dimensions
+        if let dimension1 = youboraConfig["contentCustomDimension1"] as? String {
+            youboraOptions?.contentCustomDimension1 = dimension1
+            print("📊 Youbora: contentCustomDimension1 = \(dimension1)")
+        }
+        
+        if let dimension2 = youboraConfig["contentCustomDimension2"] as? String {
+            youboraOptions?.contentCustomDimension2 = dimension2
+            print("📊 Youbora: contentCustomDimension2 = \(dimension2)")
+        }
+        
+        if let dimension3 = youboraConfig["contentCustomDimension3"] as? String {
+            youboraOptions?.contentCustomDimension3 = dimension3
+            print("📊 Youbora: contentCustomDimension3 = \(dimension3)")
+        }
+        
+        if let dimension4 = youboraConfig["contentCustomDimension4"] as? String {
+            youboraOptions?.contentCustomDimension4 = dimension4
+            print("📊 Youbora: contentCustomDimension4 = \(dimension4)")
+        }
+        
+        if let dimension5 = youboraConfig["contentCustomDimension5"] as? String {
+            youboraOptions?.contentCustomDimension5 = dimension5
+            print("📊 Youbora: contentCustomDimension5 = \(dimension5)")
+        }
+        
+        // Initialize Youbora adapter and plugin
+        if let options = youboraOptions {
+            print("📊 Youbora: Creating adapter and plugin")
+            youboraAdapter = YouboraWrapper(weak: jwPlayer, options: options)
+            youboraAdapter?.bindPlugin()
+            youboraPlugin = youboraAdapter?.getPlugin()
+            
+            print("📊 Youbora: Firing start event")
+            youboraPlugin?.adapter?.fireStart()
+            
+            print("📊 Youbora: Configuration completed successfully")
+        } else {
+            print("📊 Youbora: Failed to create options")
+        }
+    }
+    
+    func cleanupYoubora() {
+        if let plugin = youboraPlugin {
+            do {
+                print("📊 Youbora: Cleaning up previous instance")
+                plugin.fireStop()
+                plugin.removeAdapter()
+                plugin.removeAdsAdapter()
+            } catch {
+                print("📊 Youbora: Exception during cleanup - \(error)")
+            }
+        }
+        youboraPlugin = nil
+        youboraAdapter = nil
+        youboraOptions = nil
+    }
+}

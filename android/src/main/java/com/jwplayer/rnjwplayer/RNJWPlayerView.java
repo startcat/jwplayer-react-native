@@ -132,6 +132,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import com.npaw.youbora.lib6.plugin.Plugin;
+import com.npaw.youbora.lib6.plugin.Options;
+
 public class RNJWPlayerView extends RelativeLayout implements
         VideoPlayerEvents.OnFullscreenListener,
         VideoPlayerEvents.OnReadyListener,
@@ -146,7 +149,7 @@ public class RNJWPlayerView extends RelativeLayout implements
         VideoPlayerEvents.OnPlaylistListener,
         VideoPlayerEvents.OnPlaylistItemListener,
         VideoPlayerEvents.OnPlaylistCompleteListener,
-        VideoPlayerEvents.onJWAudioTracksListener,
+        VideoPlayerEvents.OnAudioTracksListener,
         VideoPlayerEvents.OnAudioTrackChangedListener,
         VideoPlayerEvents.OnControlsListener,
         VideoPlayerEvents.OnControlBarVisibilityListener,
@@ -155,8 +158,8 @@ public class RNJWPlayerView extends RelativeLayout implements
         VideoPlayerEvents.OnSeekListener,
         VideoPlayerEvents.OnSeekedListener,
         VideoPlayerEvents.OnPlaybackRateChangedListener,
-        VideoPlayerEvents.onJWCaptionsListListener,
-        VideoPlayerEvents.onJWCaptionsChangedListener,
+        VideoPlayerEvents.OnCaptionsListListener,
+        VideoPlayerEvents.OnCaptionsChangedListener,
         VideoPlayerEvents.OnMetaListener,
         VideoPlayerEvents.PlaylistItemCallbackListener,
 
@@ -237,6 +240,10 @@ public class RNJWPlayerView extends RelativeLayout implements
     private ThemedReactContext mThemedReactContext;
 
     private MediaServiceController mMediaServiceController;
+    
+    // Youbora properties
+    private Plugin youboraPlugin;
+    private Options youboraOptions;
     private PipHandlerReceiver mReceiver = null;
 
     // Add completion handler field
@@ -369,6 +376,9 @@ public class RNJWPlayerView extends RelativeLayout implements
 
     public void destroyPlayer() {
         if (mPlayer != null) {
+            // Cleanup Youbora before destroying player
+            cleanupYoubora();
+            
             unRegisterReceiver();
 
             // If we are casting we need to break the cast session as there is no simple
@@ -897,6 +907,11 @@ public class RNJWPlayerView extends RelativeLayout implements
     }
 
     public void setConfig(ReadableMap prop) {
+        if (prop == null) {
+            Log.e(TAG, "setConfig called with null prop");
+            return;
+        }
+        
         if (mConfig == null || !mConfig.equals(prop)) {
             if (mConfig != null && isOnlyDiff(prop, "playlist") && mPlayer != null) { // still safe check, even with JW
                 // JSON change
@@ -1157,6 +1172,9 @@ public class RNJWPlayerView extends RelativeLayout implements
             PlayerConfig playerConfig = configBuilder.build();
             mPlayer.setup(playerConfig);
         }
+        
+        // Setup Youbora after player configuration
+        setupYoubora(prop, mPlayer);
 
         if (mActivity != null && prop.hasKey("pipEnabled")) {
             boolean pipEnabled = prop.getBoolean("pipEnabled");
@@ -1585,7 +1603,7 @@ public class RNJWPlayerView extends RelativeLayout implements
     // Audio Events
 
     @Override
-    public void onJWAudioTracks(AudioTracksEvent audioTracksEvent) {
+    public void onAudioTracks(AudioTracksEvent audioTracksEvent) {
         WritableMap event = Arguments.createMap();
         event.putString("message", "onJWAudioTracks");
         getReactContext().getJSModule(RCTEventEmitter.class).receiveEvent(getId(), "topAudioTracks", event);
@@ -1599,7 +1617,7 @@ public class RNJWPlayerView extends RelativeLayout implements
     // Captions Events
 
     @Override
-    public void onJWCaptionsChanged(CaptionsChangedEvent captionsChangedEvent) {
+    public void onCaptionsChanged(CaptionsChangedEvent captionsChangedEvent) {
         WritableMap event = Arguments.createMap();
         event.putString("message", "onJWCaptionsChanged");
         event.putInt("index", captionsChangedEvent.getCurrentTrack());
@@ -1607,7 +1625,7 @@ public class RNJWPlayerView extends RelativeLayout implements
     }
 
     @Override
-    public void onJWCaptionsList(CaptionsListEvent captionsListEvent) {
+    public void onCaptionsList(CaptionsListEvent captionsListEvent) {
         WritableMap event = Arguments.createMap();
         List<Caption> captionTrackList = captionsListEvent.getCaptions();
         WritableArray captionTracks = Arguments.createArray();
@@ -1938,6 +1956,195 @@ public class RNJWPlayerView extends RelativeLayout implements
             .put("playback_submenu", UiGroup.SETTINGS_PLAYBACK_SUBMENU)
             .put("audiotracks_submenu", UiGroup.SETTINGS_AUDIOTRACKS_SUBMENU)
             .put("casting_menu", UiGroup.CASTING_MENU).build();
+    
+    // Youbora Integration
+    private void setupYoubora(ReadableMap config, JWPlayer player) {
+        if (config == null) {
+            Log.d(TAG, "📊 Youbora: Config is null");
+            return;
+        }
+        
+        if (!config.hasKey("youbora")) {
+            Log.d(TAG, "📊 Youbora: No configuration found");
+            return;
+        }
+        
+        ReadableMap youboraConfig = null;
+        try {
+            youboraConfig = config.getMap("youbora");
+        } catch (Exception e) {
+            Log.e(TAG, "📊 Youbora: Error reading config - " + e.getMessage());
+            return;
+        }
+        
+        if (youboraConfig == null) {
+            Log.d(TAG, "📊 Youbora: Configuration is null");
+            return;
+        }
+        
+        // Clean up previous Youbora instance if exists
+        cleanupYoubora();
+        
+        // Create Youbora options
+        youboraOptions = new Options();
+        youboraOptions.setAutoDetectBackground(true);
+        youboraOptions.setOffline(false);
+        youboraOptions.setEnabled(true);
+        
+        Log.d(TAG, "📊 Youbora: Starting configuration");
+        
+        // Parse enabled flag
+        if (youboraConfig.hasKey("enabled")) {
+            try {
+                boolean enabled = true;
+                try {
+                    enabled = youboraConfig.getBoolean("enabled");
+                } catch (Exception e) {
+                    String enabledStr = youboraConfig.getString("enabled");
+                    enabled = Boolean.parseBoolean(enabledStr);
+                }
+                youboraOptions.setEnabled(enabled);
+                Log.d(TAG, "📊 Youbora: enabled = " + enabled);
+            } catch (Exception e) {
+                Log.e(TAG, "📊 Youbora: Error parsing enabled - " + e.getMessage());
+            }
+        }
+        
+        // Parse offline flag
+        if (youboraConfig.hasKey("offline")) {
+            try {
+                boolean offline = false;
+                try {
+                    offline = youboraConfig.getBoolean("offline");
+                } catch (Exception e) {
+                    String offlineStr = youboraConfig.getString("offline");
+                    offline = Boolean.parseBoolean(offlineStr);
+                }
+                youboraOptions.setOffline(offline);
+                Log.d(TAG, "📊 Youbora: offline = " + offline);
+            } catch (Exception e) {
+                Log.e(TAG, "📊 Youbora: Error parsing offline - " + e.getMessage());
+            }
+        }
+        
+        // Parse accountCode (required)
+        if (youboraConfig.hasKey("accountCode")) {
+            String accountCode = youboraConfig.getString("accountCode");
+            youboraOptions.setAccountCode(accountCode);
+            Log.d(TAG, "📊 Youbora: accountCode = " + accountCode);
+        }
+        
+        // Parse contentTransactionCode (required)
+        if (youboraConfig.hasKey("contentTransactionCode")) {
+            String contentTransactionCode = youboraConfig.getString("contentTransactionCode");
+            youboraOptions.setContentTransactionCode(contentTransactionCode);
+            Log.d(TAG, "📊 Youbora: contentTransactionCode = " + contentTransactionCode);
+        }
+        
+        // Parse username
+        if (youboraConfig.hasKey("username")) {
+            String username = youboraConfig.getString("username");
+            youboraOptions.setUsername(username);
+            Log.d(TAG, "📊 Youbora: username = " + username);
+        }
+        
+        // Parse contentTitle
+        if (youboraConfig.hasKey("contentTitle")) {
+            String contentTitle = youboraConfig.getString("contentTitle");
+            youboraOptions.setContentTitle(contentTitle);
+            Log.d(TAG, "📊 Youbora: contentTitle = " + contentTitle);
+        }
+        
+        // Parse contentIsLive
+        if (youboraConfig.hasKey("contentIsLive")) {
+            try {
+                boolean contentIsLive = false;
+                // Try to read as boolean first
+                try {
+                    contentIsLive = youboraConfig.getBoolean("contentIsLive");
+                } catch (Exception e) {
+                    // If it fails, try to read as string and parse
+                    String contentIsLiveStr = youboraConfig.getString("contentIsLive");
+                    contentIsLive = Boolean.parseBoolean(contentIsLiveStr);
+                }
+                youboraOptions.setContentIsLive(contentIsLive);
+                Log.d(TAG, "📊 Youbora: contentIsLive = " + contentIsLive);
+            } catch (Exception e) {
+                Log.e(TAG, "📊 Youbora: Error parsing contentIsLive - " + e.getMessage());
+            }
+        }
+        
+        // Parse program
+        if (youboraConfig.hasKey("program")) {
+            String program = youboraConfig.getString("program");
+            youboraOptions.setProgram(program);
+            Log.d(TAG, "📊 Youbora: program = " + program);
+        }
+        
+        // Parse custom dimensions
+        if (youboraConfig.hasKey("contentCustomDimension1")) {
+            String dimension1 = youboraConfig.getString("contentCustomDimension1");
+            youboraOptions.setContentCustomDimension1(dimension1);
+            Log.d(TAG, "📊 Youbora: contentCustomDimension1 = " + dimension1);
+        }
+        
+        if (youboraConfig.hasKey("contentCustomDimension2")) {
+            String dimension2 = youboraConfig.getString("contentCustomDimension2");
+            youboraOptions.setContentCustomDimension2(dimension2);
+            Log.d(TAG, "📊 Youbora: contentCustomDimension2 = " + dimension2);
+        }
+        
+        if (youboraConfig.hasKey("contentCustomDimension3")) {
+            String dimension3 = youboraConfig.getString("contentCustomDimension3");
+            youboraOptions.setContentCustomDimension3(dimension3);
+            Log.d(TAG, "📊 Youbora: contentCustomDimension3 = " + dimension3);
+        }
+        
+        if (youboraConfig.hasKey("contentCustomDimension4")) {
+            String dimension4 = youboraConfig.getString("contentCustomDimension4");
+            youboraOptions.setContentCustomDimension4(dimension4);
+            Log.d(TAG, "📊 Youbora: contentCustomDimension4 = " + dimension4);
+        }
+        
+        if (youboraConfig.hasKey("contentCustomDimension5")) {
+            String dimension5 = youboraConfig.getString("contentCustomDimension5");
+            youboraOptions.setContentCustomDimension5(dimension5);
+            Log.d(TAG, "📊 Youbora: contentCustomDimension5 = " + dimension5);
+        }
+        
+        // Initialize Youbora plugin
+        try {
+            Log.d(TAG, "📊 Youbora: Creating plugin");
+            youboraPlugin = new Plugin(youboraOptions, getContext());
+            
+            // Register the JWPlayer instance with Youbora
+            // The adapter from com.nicepeopleatwork:jwplayer-adapter will auto-detect JWPlayer
+            youboraPlugin.setActivity(mActivity);
+            
+            Log.d(TAG, "📊 Youbora: Plugin created and configured");
+            Log.d(TAG, "📊 Youbora: Configuration completed successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "📊 Youbora: Error during initialization - " + e.getMessage(), e);
+        }
+    }
+    
+    private void cleanupYoubora() {
+        if (youboraPlugin != null) {
+            try {
+                Log.d(TAG, "📊 Youbora: Cleaning up previous instance");
+                youboraPlugin.fireStop();
+                youboraPlugin.removeAdapter();
+                youboraPlugin.removeAdsAdapter();
+                // Ensure plugin is fully destroyed
+                youboraPlugin = null;
+            } catch (Exception e) {
+                Log.e(TAG, "📊 Youbora: Exception during cleanup - " + e.getMessage(), e);
+                // Force null even if cleanup fails
+                youboraPlugin = null;
+            }
+        }
+        youboraOptions = null;
+    }
 }
 
 
