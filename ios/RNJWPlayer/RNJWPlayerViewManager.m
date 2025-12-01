@@ -94,6 +94,8 @@ RCT_EXTERN_METHOD(seekTo: (nonnull NSNumber *)reactTag: (nonnull NSNumber *)time
 
 RCT_EXTERN_METHOD(setVolume: (nonnull NSNumber *)reactTag :(nonnull NSNumber *)volume)
 
+RCT_EXTERN_METHOD(getVolume: (nonnull NSNumber *)reactTag :(RCTPromiseResolveBlock)resolve :(RCTPromiseRejectBlock)reject)
+
 RCT_EXTERN_METHOD(togglePIP: (nonnull NSNumber *)reactTag)
 
 RCT_EXTERN_METHOD(resolveNextPlaylistItem: (nonnull NSNumber *)reactTag :(nonnull NSDictionary *)playlistItem)

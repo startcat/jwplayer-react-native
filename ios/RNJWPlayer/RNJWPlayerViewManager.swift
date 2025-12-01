@@ -209,6 +209,25 @@ class RNJWPlayerViewManager: RCTViewManager {
         }
     }
     
+    @objc func getVolume(_ reactTag: NSNumber, _ resolve: @escaping RCTPromiseResolveBlock, _ reject: @escaping RCTPromiseRejectBlock) {
+        DispatchQueue.main.async {
+            guard let view = self.getPlayerView(reactTag: reactTag) else {
+                let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "There is no player"])
+                reject("no_player", "Invalid view returned from registry, expecting RNJWPlayerView", error)
+                return
+            }
+            
+            if let playerView = view.playerView {
+                resolve(NSNumber(value: playerView.player.volume))
+            } else if let playerViewController = view.playerViewController {
+                resolve(NSNumber(value: playerViewController.player.volume))
+            } else {
+                let error = NSError(domain: "", code: 0, userInfo: [NSLocalizedDescriptionKey: "There is no player"])
+                reject("no_player", "There is no player", error)
+            }
+        }
+    }
+    
     @objc func togglePIP(_ reactTag: NSNumber) {
         DispatchQueue.main.async {
             guard let view = self.getPlayerView(reactTag: reactTag), let pipController = view.playerView?.pictureInPictureController else {
