@@ -36,6 +36,9 @@ public class Util {
             throws IOException {
         HttpURLConnection urlConnection = null;
         try {
+            Log.d("Util", "🌐 executePost - URL: " + url);
+            Log.d("Util", "🌐 executePost - Data size: " + (data != null ? data.length : 0));
+            
             urlConnection = (HttpURLConnection) new URL(url).openConnection();
             urlConnection.setRequestMethod("POST");
             urlConnection.setDoOutput(data != null);
@@ -58,10 +61,17 @@ public class Util {
             // Read and return the response body.
             InputStream inputStream = urlConnection.getInputStream();
             try {
-                return toByteArray(inputStream);
+                byte[] response = toByteArray(inputStream);
+                int responseCode = urlConnection.getResponseCode();
+                Log.d("Util", "🌐 executePost - Response code: " + responseCode + ", size: " + (response != null ? response.length : 0));
+                return response;
             } finally {
                 inputStream.close();
             }
+        } catch (IOException e) {
+            int responseCode = urlConnection != null ? urlConnection.getResponseCode() : -1;
+            Log.e("Util", "🌐 executePost - ERROR: " + e.getMessage() + " (Response code: " + responseCode + ")", e);
+            throw e;
         } finally {
             if (urlConnection != null) {
                 urlConnection.disconnect();
@@ -88,6 +98,29 @@ public class Util {
             try {
                 obj = MapUtil.toJSONObject(playlistItem);
                 item = JsonHelper.parsePlaylistItemJson(obj);
+                
+                // IMPORTANT: JsonHelper.parsePlaylistItemJson doesn't handle authUrl
+                // We need to add DRM callback manually if authUrl is present
+                if (item != null && playlistItem.hasKey("authUrl")) {
+                    String authUrl = playlistItem.getString("authUrl");
+                    Log.d("Util", "🔐 Adding DRM callback to parsed item with authUrl: " + authUrl);
+                    
+                    // Rebuild the item with DRM callback
+                    PlaylistItem.Builder builder = new PlaylistItem.Builder()
+                            .file(item.getFile())
+                            .title(item.getTitle())
+                            .description(item.getDescription())
+                            .image(item.getImage())
+                            .mediaId(item.getMediaId())
+                            .startTime(item.getStartTime())
+                            .duration(item.getDuration())
+                            .tracks(item.getTracks())
+                            .sources(item.getSources())
+                            .adSchedule(item.getAdSchedule())
+                            .mediaDrmCallback(new WidevineCallback(authUrl));
+                    
+                    item = builder.build();
+                }
             } catch (Exception ex) {
                 Log.e("createPlaylist", ex.toString());
             }
@@ -194,7 +227,11 @@ public class Util {
         }
 
         if (playlistItem.hasKey("authUrl")) {
-            itemBuilder.mediaDrmCallback(new WidevineCallback(playlistItem.getString("authUrl")));
+            String authUrl = playlistItem.getString("authUrl");
+            Log.d("Util", "🔐 Setting DRM callback for playlist item with authUrl: " + authUrl);
+            itemBuilder.mediaDrmCallback(new WidevineCallback(authUrl));
+        } else {
+            Log.d("Util", "ℹ️ No authUrl found for playlist item");
         }
 
         if (playlistItem.hasKey("adSchedule")) {
